@@ -2,7 +2,10 @@ extends CharacterBody3D
 class_name PlayerCharacter
 
 ## Based on "Jeheno Advanced First Person Controller" by Jeh3no
-## with modified logic, models and multiplayer compatibility
+## with modified logic, models, multiplayer compatibility, and grappling hook integration
+
+const HOOK_AVAILABLE_TEXTURE = preload("res://addons/grappling_hook_3d/example/hook_availible.png")
+const HOOK_NOT_AVAILABLE_TEXTURE = preload("res://addons/grappling_hook_3d/example/hook_not_availible.png")
 
 @export var nick_label: Label3D
 @export_group("Movement variables")
@@ -46,7 +49,7 @@ var walk_or_run: String = "WalkState" #keep in memory if play char was walking o
 @export var _walk_deccel: float = 20.0
 
 @export_group("Run variables")
-@export var _run_speed: float = 24.0
+@export var _run_speed: float = 18.0
 @export var _run_accel: float = 20.0
 @export var _run_deccel: float = 18.0
 
@@ -60,7 +63,7 @@ var gravity_modifier: float = 1.0
 @export var _jump_time_to_peak: float = 0.4
 @export var _jump_time_to_fall: float = 0.4
 @onready var jump_velocity: float:
-	get: return  ((_jump_height) / jump_time_to_peak)/gravity_modifier 
+	get: return ((_jump_height) / jump_time_to_peak)/gravity_modifier 
 @export var jump_cooldown: float = 0.25
 var jump_cooldown_ref: float
 @export var nb_jumps_in_air_allowed: int = 3
@@ -80,8 +83,6 @@ var slide_direction: Vector3 = Vector3.ZERO
 @export var _slide_deccel: float = 0.5
 
 @export var _slide_time: float = 0.5
-
-
 
 var slide_time_ref: float
 @export var time_bef_can_slide_again: float = 0.1
@@ -166,14 +167,16 @@ var jump_gravity: float: get = get_jump_gravity
 @export var slide_action: StringName = "play_char_slide_action"
 @export var dash_action: StringName = "play_char_dash_action"
 @export var fly_action: StringName = "play_char_fly_action"
+@export var hook_action: StringName = "play_char_hook_action"
 
-
-@onready var input_actions_list : Array[StringName] = [move_forward_action, move_backward_action, move_left_action, move_right_action, 
-run_action, crouch_action, jump_action, slide_action, dash_action, fly_action]
+@onready var input_actions_list : Array[StringName] = [
+	move_forward_action, move_backward_action, move_left_action, move_right_action, 
+	run_action, crouch_action, jump_action, slide_action, dash_action, fly_action, hook_action
+]
 @export var check_on_ready_if_inputs_registered : bool = true
 var default_input_actions : Dictionary
 
-#references variables
+# references variables
 @onready var cam_holder: CameraObject = %CameraHolder
 @onready var cam: Camera3D = %Camera
 @onready var model: MeshInstance3D = $Model
@@ -188,10 +191,16 @@ var default_input_actions : Dictionary
 @onready var right_wall_check : RayCast3D = %RightWallCheck
 @onready var character_model: Node3D = %CharacterModel
 
+# Grappling Hook references
+@onready var hook_raycast: RayCast3D = $CameraHolder/Camera/HookCheck
+@onready var hook_controller: HookController = $HookController
+@onready var crosshair: TextureRect = $HUD/Crosshair
+
+
 func _ready() -> void:
 	if not is_multiplayer_authority(): cam_holder.camera.clear_current(); return
 	
-	#set and value references
+	# set and value references
 	hit_ground_cooldown_ref = hit_ground_cooldown
 	jump_cooldown_ref = jump_cooldown
 	jump_cooldown = -1.0
@@ -214,7 +223,7 @@ func _ready() -> void:
 	input_actions_check()
 	
 func build_default_keybinding() -> void:
-	#build it in runtime to ensure that export variables have been set
+	# build it in runtime to ensure that export variables have been set
 	default_input_actions = {
 		move_forward_action : [Key.KEY_W, Key.KEY_UP],
 		move_backward_action : [Key.KEY_S, Key.KEY_DOWN],
@@ -226,11 +235,11 @@ func build_default_keybinding() -> void:
 		slide_action : [Key.KEY_CTRL],
 		dash_action : [Key.KEY_ALT],
 		fly_action : [Key.KEY_F],
+		hook_action : [MouseButton.MOUSE_BUTTON_RIGHT]
 	}
 
 func input_actions_check() -> void:
-	#check if the input actions written in the editor are the same as the ones registered in the Input map, and if they are written correctly
-	#if not, add it to runtime Input map with default keybindings
+	# check if the input actions written in the editor are the same as the ones registered in the Input map
 	if check_on_ready_if_inputs_registered:
 		var registered_input_actions: Array[StringName] = []
 		for input_action in InputMap.get_actions():
@@ -242,13 +251,17 @@ func input_actions_check() -> void:
 				assert(false, "There's an undefined input action")
 				
 			if not registered_input_actions.has(input_action):
-				
 				InputMap.add_action(input_action)
 				for keycode in default_input_actions[input_action]:
-					var input_event_key = InputEventKey.new()
-					input_event_key.physical_keycode = keycode
-					InputMap.action_add_event(input_action, input_event_key)
-	
+					if keycode is Key:
+						var input_event_key = InputEventKey.new()
+						input_event_key.physical_keycode = keycode
+						InputMap.action_add_event(input_action, input_event_key)
+					elif keycode is MouseButton:
+						var input_event_mouse = InputEventMouseButton.new()
+						input_event_mouse.button_index = keycode
+						InputMap.action_add_event(input_action, input_event_mouse)
+
 func _update_model_visuals() -> void: character_model.rotation_degrees.y = cam_holder.rotation_degrees.y
 
 func _update_nick_label() -> void:
@@ -266,34 +279,49 @@ func _update_nick_label() -> void:
 				break
 		nick_label.text = nickname
 
+func update_hook_ui() -> void:
+	if not crosshair or not hook_raycast or not hook_controller:
+		return
+		
+	# 1. Update texture based on whether the hook is colliding and ready
+	var is_target_valid: bool = hook_raycast.is_colliding() and not hook_controller.is_hook_launched
+	crosshair.texture = HOOK_AVAILABLE_TEXTURE if is_target_valid else HOOK_NOT_AVAILABLE_TEXTURE
+
+	# 2. Position the crosshair UI over the target hit point
+	if is_target_valid:
+		var hit_position_3d: Vector3 = hook_raycast.get_collision_point()
+		
+		# Convert 3D world coordinate to 2D screen pixel coordinate
+		var screen_position_2d: Vector2 = cam.unproject_position(hit_position_3d)
+		
+		# Offset position by half the texture size so the center of the icon aligns with the target
+		crosshair.global_position = screen_position_2d - (crosshair.size / 2.0)
+	else:
+		# Reset crosshair back to center screen when not pointing at a valid hook surface
+		var viewport_center: Vector2 = get_viewport().get_visible_rect().size / 2.0
+		crosshair.global_position = viewport_center - (crosshair.size / 2.0)
+
 func _process(delta: float) -> void:
-	
 	_update_model_visuals()
-	
 	_update_nick_label()
 
-	
 	if multiplayer.has_multiplayer_peer() and not is_multiplayer_authority(): return
 
+	update_hook_ui()
 	wallrun_timer(delta)
-	
 	slide_timer(delta)
-
 	dash_timer(delta)
 	
 func _physics_process(_delta: float) -> void:
-	
 	if multiplayer.has_multiplayer_peer() and not is_multiplayer_authority(): return
 	
 	modify_physics_properties()
-
 	move_and_slide()
 
 func wallrun_timer(delta : float) -> void:
 	if !can_wallrun:
 		if time_bef_can_wallrun_again > 0.0: time_bef_can_wallrun_again -= delta
 		else:
-			#can only reset capacity of wallrunning when not currently wallrunning
 			if state_machine.curr_state_name != "Wallrun":
 				wallrun_time = wallrun_time_ref
 				can_wallrun = true
@@ -301,13 +329,10 @@ func wallrun_timer(delta : float) -> void:
 func slide_timer(delta: float) -> void:
 	if time_bef_can_slide_again > 0.0: time_bef_can_slide_again -= delta
 	else:
-		#can only reset slide time when not sliding
 		if state_machine.curr_state_name != "Slide":
 			slide_time = slide_time_ref
 			
 func dash_timer(delta: float) -> void:
-	#reloads dash every *timeBefReloadDash* time, to avoid dash spamming
-	#if you want to be able to spam dashes, set timeBefReloadDash to 0.0
 	if nb_dashs_allowed < nb_dashs_allowed_ref:
 		if time_bef_reload_dash > 0.0: time_bef_reload_dash -= delta
 		else:
@@ -316,31 +341,26 @@ func dash_timer(delta: float) -> void:
 	
 	if time_bef_can_dash_again > 0.0: time_bef_can_dash_again = maxf(0,time_bef_can_dash_again-delta)
 	else:
-		#can only reset slide time when not dashing
 		if state_machine.curr_state_name != "Dash":
 			dash_time = dash_time_ref
 			
 func modify_physics_properties() -> void:
-	last_frame_position = global_position #get play char global position every frame
-	last_frame_velocity = velocity #get play char velocity every frame
-	was_on_floor = !is_on_floor() #check if play char was on floor every frame
+	last_frame_position = global_position 
+	last_frame_velocity = velocity 
+	was_on_floor = !is_on_floor() 
 
 func gravity_apply(delta: float) -> void:
-	# if play char goes up, apply jump gravity
-	#otherwise, apply fall gravity
-	if not is_on_floor(): #no need to push play char if he's already on the floor
+	if not is_on_floor(): 
 		if velocity.y >= 0.0:
 			velocity.y += get_jump_gravity() * delta
 		elif velocity.y < 0.0:
 			velocity.y += get_fall_gravity() * delta
 	
-#use of 2 tweens to change the hitbox and model heights, relative to a specific state
 func tween_hitbox_height(state_hitbox_height : float) -> void:
 	var hitbox_tween: Tween = create_tween()
 	if hitbox != null:
 		hitbox_tween.tween_method(func(v): set_hitbox_height(v), hitbox.shape.height, 
 		state_hitbox_height, height_change_duration)
-	#to avoid "no tweeners" error
 	else:
 		hitbox_tween.tween_interval(0.1)
 	hitbox_tween.finished.connect(Callable(hitbox_tween, "kill"))

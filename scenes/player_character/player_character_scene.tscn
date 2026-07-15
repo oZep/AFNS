@@ -6,13 +6,14 @@
 [ext_resource type="Script" uid="uid://hc1xroood24q" path="res://scenes/player_character/dependencies/StateMachine/slide_state_script.gd" id="10_poibi"]
 [ext_resource type="Script" uid="uid://c4skioddhqatw" path="res://scenes/player_character/dependencies/StateMachine/dash_state_script.gd" id="11_khex2"]
 [ext_resource type="Script" uid="uid://bq1stj2mujnp2" path="res://scenes/player_character/dependencies/StateMachine/wallrun_state_script.gd" id="12_5fuve"]
-[ext_resource type="LabelSettings" uid="uid://bs0stms0b56kp" path="res://addons/JehenoAdvancedFirstPersonController(Modified)/Arts/label_settings.tres" id="14_gfbru"]
+[ext_resource type="LabelSettings" uid="uid://bs0stms0b56kp" path="res://common/addons/JehenoAdvancedFirstPersonController(Modified)/Arts/label_settings.tres" id="14_gfbru"]
 [ext_resource type="Shader" uid="uid://b34228uop3gdf" path="res://scenes/player_character/dependencies/speed_lines_shader.gdshader" id="14_jv0i6"]
 [ext_resource type="Script" uid="uid://dx02l6p6behb8" path="res://scenes/player_character/dependencies/hud/hud_script.gd" id="16_5jm78"]
-[ext_resource type="Texture2D" uid="uid://dv747ov6fcrsg" path="res://addons/JehenoAdvancedFirstPersonController(Modified)/Arts/crosshair.png" id="16_gfbru"]
+[ext_resource type="Texture2D" uid="uid://dv747ov6fcrsg" path="res://common/addons/JehenoAdvancedFirstPersonController(Modified)/Arts/crosshair.png" id="16_gfbru"]
 [ext_resource type="StyleBox" uid="uid://c50syhy1a4dmh" path="res://scenes/player_character/dependencies/hud/player_character_ui_theme.tres" id="18_ovq28"]
 [ext_resource type="Script" uid="uid://bxoec4xdvahr4" path="res://scenes/player_character/dependencies/robot_model/robot_model_script.gd" id="19_58bc8"]
 [ext_resource type="Texture2D" uid="uid://bdg48m6l86q8i" path="res://scenes/player_character/dependencies/robot_model/3DGodotRobot_GodotPalette.png" id="20_pp6m3"]
+[ext_resource type="Script" uid="uid://dpgliron0wf85" path="res://addons/grappling_hook_3d/src/hook_controller.gd" id="22_cnxmy"]
 [ext_resource type="AnimationLibrary" uid="uid://yu742gs4ld07" path="res://scenes/player_character/dependencies/robot_model/godot_robot_animations.res" id="23_1dajo"]
 [ext_resource type="Script" uid="uid://sca7ypsol83f" path="res://scenes/player_character/dependencies/StateMachine/state_machine_script.gd" id="54_e0r17"]
 [ext_resource type="Script" uid="uid://stil4xkf3tk0" path="res://scenes/player_character/dependencies/StateMachine/idle_state_script.gd" id="55_dayh2"]
@@ -565,6 +566,9 @@ cull_mask = 1
 fov = 90.0
 near = 0.01
 far = 1000.0
+
+[node name="HookCheck" type="RayCast3D" parent="CameraHolder/Camera" unique_id=1515923088]
+target_position = Vector3(0, 0, -25)
 
 [node name="CameraBasedRaycasts" type="Node3D" parent="CameraHolder/Camera" unique_id=646245534]
 
@@ -1346,5 +1350,12 @@ mesh = SubResource("SphereMesh_u7t1t")
 [node name="AnimationPlayer" type="AnimationPlayer" parent="CharacterModel/RobotModel" unique_id=1516866237]
 libraries/Robot = ExtResource("23_1dajo")
 autoplay = &"Idle"
+
+[node name="HookController" type="Node" parent="." unique_id=1690309247 node_paths=PackedStringArray("hook_raycast", "player_body")]
+script = ExtResource("22_cnxmy")
+hook_raycast = NodePath("../CameraHolder/Camera/HookCheck")
+player_body = NodePath("..")
+launch_action_name = "hook"
+retract_action_name = "hook"
 
 [connection signal="change_fov" from="StateMachine" to="CameraHolder" method="change_fov"]
